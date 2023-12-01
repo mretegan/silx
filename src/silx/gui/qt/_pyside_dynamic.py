@@ -1,4 +1,4 @@
-# Adapted from https://github.com/spyder-ide/qtpy/blob/296dee3da8aba381b3cf17da34a6d17626e50357/qtpy/uic.py
+# Adapted from https://github.com/spyder-ide/qtpy/blob/a5f254828644331d247d3566c285bb0939ccb4d4/qtpy/uic.py
 # In PySide, loadUi does not exist, so we define it using QUiLoader, and
 # then make sure we expose that function. This is adapted from qt-helpers
 # which was released under a 3-clause BSD license:
@@ -63,51 +63,13 @@
 
 """How to load a user interface dynamically with PySide6"""
 
-import logging
-
 from ._qt import BINDING
-if BINDING != 'PySide6':
+
+if BINDING != "PySide6":
     raise RuntimeError("Unsupported Qt binding: %s", BINDING)
 
-from PySide6.QtCore import QMetaObject, Property, Qt
-from PySide6.QtWidgets import QFrame
+from PySide6.QtCore import QMetaObject
 from PySide6.QtUiTools import QUiLoader
-
-
-_logger = logging.getLogger(__name__)
-
-
-# Specific custom widgets
-
-class _Line(QFrame):
-    """Widget to use as 'Line' Qt designer"""
-    def __init__(self, parent=None):
-        super(_Line, self).__init__(parent)
-        self.setFrameShape(QFrame.HLine)
-        self.setFrameShadow(QFrame.Sunken)
-
-    def getOrientation(self):
-        shape = self.frameShape()
-        if shape == QFrame.HLine:
-            return Qt.Horizontal
-        elif shape == QFrame.VLine:
-            return Qt.Vertical
-        else:
-            raise RuntimeError("Wrong shape: %d", shape)
-
-    def setOrientation(self, orientation):
-        if orientation == Qt.Horizontal:
-            self.setFrameShape(QFrame.HLine)
-        elif orientation == Qt.Vertical:
-            self.setFrameShape(QFrame.VLine)
-        else:
-            raise ValueError("Unsupported orientation %s" % str(orientation))
-
-    orientation = Property("Qt::Orientation", getOrientation, setOrientation)
-
-
-CUSTOM_WIDGETS = {"Line": _Line}
-"""Default custom widgets for `loadUi`"""
 
 
 class UiLoader(QUiLoader):
@@ -147,7 +109,7 @@ class UiLoader(QUiLoader):
         else:
             self.customWidgets = customWidgets
 
-    def createWidget(self, class_name, parent=None, name=''):
+    def createWidget(self, class_name, parent=None, name=""):
         """
         Function that is called for each widget defined in ui file,
         overridden here to populate baseinstance instead.
@@ -158,33 +120,31 @@ class UiLoader(QUiLoader):
             # instance instead
             return self.baseinstance
 
+        # For some reason, Line is not in the list of available
+        # widgets, but works fine, so we have to special case it here.
+        if class_name in self.availableWidgets() or class_name == "Line":
+            # create a new widget for child widgets
+            widget = QUiLoader.createWidget(self, class_name, parent, name)
+
         else:
+            # If not in the list of availableWidgets, must be a custom
+            # widget. This will raise KeyError if the user has not
+            # supplied the relevant class_name in the dictionary or if
+            # customWidgets is empty.
+            try:
+                widget = self.customWidgets[class_name](parent)
+            except KeyError as error:
+                raise Exception(
+                    f"No custom widget {class_name} found in customWidgets",
+                ) from error
 
-            # For some reason, Line is not in the list of available
-            # widgets, but works fine, so we have to special case it here.
-            if class_name in self.availableWidgets() or class_name == 'Line':
-                # create a new widget for child widgets
-                widget = QUiLoader.createWidget(self, class_name, parent, name)
+        if self.baseinstance:
+            # set an attribute for the new child widget on the base
+            # instance, just like PyQt4.uic.loadUi does.
+            setattr(self.baseinstance, name, widget)
 
-            else:
-                # If not in the list of availableWidgets, must be a custom
-                # widget. This will raise KeyError if the user has not
-                # supplied the relevant class_name in the dictionary or if
-                # customWidgets is empty.
-                try:
-                    widget = self.customWidgets[class_name](parent)
-                except KeyError as error:
-                    raise Exception(
-                        f'No custom widget {class_name} '
-                        'found in customWidgets'
-                        ) from error
+        return widget
 
-            if self.baseinstance:
-                # set an attribute for the new child widget on the base
-                # instance, just like PyQt4.uic.loadUi does.
-                setattr(self.baseinstance, name, widget)
-
-            return widget
 
 def _get_custom_widgets(ui_file):
     """
@@ -192,7 +152,6 @@ def _get_custom_widgets(ui_file):
     section, then automatically load all the custom widget classes.
     """
 
-    import sys
     import importlib
     from xml.etree.ElementTree import ElementTree
 
@@ -201,7 +160,7 @@ def _get_custom_widgets(ui_file):
     ui = etree.parse(ui_file)
 
     # Get the customwidgets section
-    custom_widgets = ui.find('customwidgets')
+    custom_widgets = ui.find("customwidgets")
 
     if custom_widgets is None:
         return {}
@@ -209,9 +168,8 @@ def _get_custom_widgets(ui_file):
     custom_widget_classes = {}
 
     for custom_widget in list(custom_widgets):
-
-        cw_class = custom_widget.find('class').text
-        cw_header = custom_widget.find('header').text
+        cw_class = custom_widget.find("class").text
+        cw_header = custom_widget.find("header").text
 
         module = importlib.import_module(cw_header)
 
@@ -220,7 +178,7 @@ def _get_custom_widgets(ui_file):
     return custom_widget_classes
 
 
-def loadUi(uifile, baseinstance=None, package=None, resource_suffix=None):
+def loadUi(uifile, baseinstance=None, workingDirectory=None):
     """
     Dynamically load a user interface from the given ``uifile``.
 
@@ -242,21 +200,14 @@ def loadUi(uifile, baseinstance=None, package=None, resource_suffix=None):
     Return ``baseinstance``, if ``baseinstance`` is not ``None``. Otherwise
     return the newly created instance of the user interface.
     """
-    if package is not None:
-        _logger.warning(
-            "loadUi package parameter not implemented with PySide")
-    if resource_suffix is not None:
-        _logger.warning(
-            "loadUi resource_suffix parameter not implemented with PySide")
 
     # We parse the UI file and import any required custom widgets
     customWidgets = _get_custom_widgets(uifile)
 
-    # Add CUSTOM_WIDGETS
-    for name, klass in CUSTOM_WIDGETS.items():
-        customWidgets.setdefault(name, klass)
-
     loader = UiLoader(baseinstance, customWidgets)
+
+    if workingDirectory is not None:
+        loader.setWorkingDirectory(workingDirectory)
 
     widget = loader.load(uifile)
     QMetaObject.connectSlotsByName(widget)
