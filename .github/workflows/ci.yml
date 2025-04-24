@@ -73,10 +73,18 @@ jobs:
         run: |
           pip install --upgrade --pre build wheel 
 
-      - name: Build Wheel
+      - name: Build Wheel (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          python -m build
+          dir dist
+
+      - name: Build Wheel (Unix)
+        if: runner.os != 'Windows'
         env:
           MACOSX_DEPLOYMENT_TARGET: "10.9"
-        shell: ${{ runner.os == 'Windows' && 'cmd' || 'bash' }}
+        shell: bash
         run: |
           python -m build
           ls dist
